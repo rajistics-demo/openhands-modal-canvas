@@ -1,0 +1,74 @@
+--- a/openhands/app_server/sandbox/sandbox_store.py
++++ b/openhands/app_server/sandbox/sandbox_store.py
+@@ -75,6 +75,8 @@
+     )
+ 
+     id: Mapped[str] = mapped_column(String, primary_key=True)
++    provider_resource_id: Mapped[str | None] = mapped_column(String, nullable=True)
++    modal_snapshot_id: Mapped[str | None] = mapped_column(String, nullable=True)
+     backend: Mapped[str] = mapped_column(String, server_default=REMOTE_BACKEND)
+     created_by_user_id: Mapped[str | None] = mapped_column(
+         String, nullable=True, index=True
+--- a/openhands/app_server/config.py
++++ b/openhands/app_server/config.py
+@@ -270,6 +270,10 @@
+     )
+     from openhands.app_server.event_callback.sql_event_callback_service import (
+         SQLEventCallbackServiceInjector,
++    )
++    from openhands.app_server.sandbox.modal_sandbox_service import (
++        ModalSandboxServiceInjector,
++        ModalSandboxSpecServiceInjector,
+     )
+     from openhands.app_server.sandbox.docker_sandbox_service import (
+         DockerSandboxServiceInjector,
+@@ -359,6 +363,8 @@
+                 api_key=os.environ['SANDBOX_API_KEY'],
+                 api_url=os.environ['SANDBOX_REMOTE_RUNTIME_API_URL'],
+             )
++        elif os.getenv('RUNTIME') == 'modal':
++            config.sandbox = ModalSandboxServiceInjector()
+         elif os.getenv('RUNTIME') == 'e2b':
+             config.sandbox = E2BSandboxServiceInjector()
+         elif os.getenv('RUNTIME') == 'k8s-agent-sandbox':
+@@ -415,6 +421,8 @@
+     if config.sandbox_spec is None:
+         if os.getenv('RUNTIME') == 'remote':
+             config.sandbox_spec = RemoteSandboxSpecServiceInjector()
++        elif os.getenv('RUNTIME') == 'modal':
++            config.sandbox_spec = ModalSandboxSpecServiceInjector()
+         elif os.getenv('RUNTIME') == 'e2b':
+             config.sandbox_spec = E2BSandboxSpecServiceInjector()
+         elif os.getenv('RUNTIME') == 'k8s-agent-sandbox':
+--- a/openhands/app_server/sandbox/sandbox_models.py
++++ b/openhands/app_server/sandbox/sandbox_models.py
+@@ -78,6 +78,9 @@
+     )
+     sandbox_spec_id: str
+     status: SandboxStatus
++    supports_runtime_pause: bool = Field(
++        default=False, description='Whether this provider supports native runtime pause and resume.'
++    )
+     session_api_key: str | None = Field(
+         description=(
+             'Key to access sandbox, to be added as an `X-Session-API-Key` header '
+--- a/openhands/app_server/app_conversation/app_conversation_models.py
++++ b/openhands/app_server/app_conversation/app_conversation_models.py
+@@ -303,6 +303,7 @@
+ 
+ 
+ class AppConversation(AppConversationInfo):  # type: ignore
++    sandbox_supports_runtime_pause: bool = Field(default=False)
+     sandbox_status: SandboxStatus = Field(
+         default=SandboxStatus.MISSING,
+         description='Current sandbox status. Will be MISSING if the sandbox does not exist.',
+--- a/openhands/app_server/app_conversation/live_status_app_conversation_service.py
++++ b/openhands/app_server/app_conversation/live_status_app_conversation_service.py
+@@ -1478,6 +1478,7 @@
+         return AppConversation(
+             **app_conversation_info.model_dump(),
+             sandbox_status=sandbox_status,
++            sandbox_supports_runtime_pause=bool(sandbox and sandbox.supports_runtime_pause),
+             execution_status=execution_status,
+             conversation_url=conversation_url,
+             conversation_ui_url=get_conversation_ui_url(app_conversation_info.id),
