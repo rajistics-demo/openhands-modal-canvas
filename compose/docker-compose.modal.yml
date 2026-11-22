@@ -1,0 +1,74 @@
+# Enterprise 1.88.0. Layer after the stock Compose and HTTPS files.
+x-modal: &modal
+  RUNTIME: modal
+  MODAL_CONFIG_PATH: /run/modal-pilot.toml
+  MODAL_PILOT_APP: ${MODAL_PILOT_APP:?Choose the existing Modal app}
+  MODAL_PILOT_SANDBOX_ID: ${MODAL_PILOT_SANDBOX_ID:?Choose the single pilot sandbox id}
+  MODAL_GATEWAY_URL: https://${MODAL_RUNTIME_HOST:?Set the runtime hostname}
+  MODAL_APP_ORIGIN: ${WEB_URL:?Set the HTTPS Enterprise origin}
+  MODAL_ENABLE_BROWSER_PREVIEW: "true"
+  OH_SANDBOX_WEB_URL: ${WEB_URL}
+  OH_APP_CONVERSATION_SANDBOX_GROUPING_STRATEGY: NO_GROUPING
+  OH_SANDBOX_LIFECYCLE_IDLE_SECONDS: "0"
+  OH_SANDBOX_LIFECYCLE_MAX_SESSION_SECONDS: "0"
+  OH_SANDBOX_LIFECYCLE_DELETE_AFTER_SECONDS: "0"
+
+services:
+  app:
+    image: ${MODAL_ENTERPRISE_IMAGE:-local/modal-enterprise:1.88.0}
+    environment: *modal
+    volumes: !override
+      - app-filestore:/.openhands
+      - type: bind
+        source: ${MODAL_CONFIG_FILE:?Set the private Modal profile path}
+        target: /run/modal-pilot.toml
+        read_only: true
+        bind:
+          create_host_path: false
+  worker:
+    image: ${MODAL_ENTERPRISE_IMAGE:-local/modal-enterprise:1.88.0}
+    environment: *modal
+    volumes: !override
+      - app-filestore:/.openhands
+      - type: bind
+        source: ${MODAL_CONFIG_FILE}
+        target: /run/modal-pilot.toml
+        read_only: true
+        bind:
+          create_host_path: false
+  modal-gateway:
+    image: ${MODAL_ENTERPRISE_IMAGE:-local/modal-enterprise:1.88.0}
+    user: openhands
+    entrypoint: []
+    command: [uvicorn, "openhands.app_server.sandbox.modal_gateway:app", "--host", "0.0.0.0", "--port", "8100", "--no-access-log", "--log-level", "warning"]
+    environment:
+      <<: *modal
+      DB_HOST: db
+      DB_PORT: "5432"
+      DB_NAME: ${DB_NAME:-openhands}
+      DB_USER: ${DB_USER:-openhands}
+      DB_PASS: ${DB_PASS:-openhands}
+      REDIS_HOST: redis
+      OH_DEPLOYMENT_MODE: self_hosted
+      OH_APP_MODE: saas
+      FILE_STORE_PATH: /.openhands
+      RUN_MIGRATIONS_ON_STARTUP: "false"
+    volumes:
+      - app-filestore:/.openhands
+      - type: bind
+        source: ${MODAL_CONFIG_FILE}
+        target: /run/modal-pilot.toml
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${MODAL_PREVIEW_KEY_FILE:?Set the private preview signing key path}
+        target: /run/modal-preview-key
+        read_only: true
+        bind:
+          create_host_path: false
+    expose: ["8100"]
+    depends_on:
+      app:
+        condition: service_healthy
+    restart: unless-stopped

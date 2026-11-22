@@ -1,0 +1,9 @@
+# Modal interfaces and design choices
+
+| Seam | Pilot choice and reason | Alternative to qualify |
+|---|---|---|
+| Catalog and sizing | The spec selects a 2-vCPU, 2-GiB Linux VM with Agent Server 1.62.0. The app is resolved with the control-plane Modal credential. | Introduce an allowlisted image and resource catalog. Record actual region, instance placement and launch time. |
+| Lifecycle and identity | Enterprise persists the stable sandbox and conversation IDs, the current Modal VM ID and the memory snapshot ID. Pause captures memory and stops the VM. Resume assigns a replacement VM only after Agent Server passes authenticated readiness. | Compare filesystem restore, cold start and provider process checkpointing separately. Define the handling of a crash between snapshot creation and recording its ID. |
+| Preview and sockets | The Enterprise gateway resolves the stable runtime route server-side and proxies to the current provider tunnel. The browser gets a short-lived preview cookie. A VM-side wrapper protects the provider port and reaches only the synthetic loopback app. | An authenticated reverse proxy or broader ingress contract can support real development servers. Verify HTTP, WebSocket, browser origin isolation and direct provider access. |
+| History | Agent Server sends session-key-authenticated event callbacks to Enterprise before the VM is paused. | Use a private callback relay if it preserves auth and retries. Test a real event while the VM is suspended. |
+| Expiry and cleanup | Modal memory snapshots are alpha and have a seven-day lifetime. The pilot terminates owned VMs and keeps test contents synthetic. | Pair memory snapshots with durable workspace archives if work must survive expiry. Verify that the original conversation can reconnect and document what happens to processes. |

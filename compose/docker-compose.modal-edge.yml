@@ -1,0 +1,44 @@
+# Use three DNS records, including <sandbox-id>.preview.<web-host>.
+services:
+  https:
+    networks:
+      default:
+        aliases:
+          - ${WEB_HOST}
+          - ${MODAL_RUNTIME_HOST}
+
+configs:
+  https-caddyfile:
+    content: |
+      ${WEB_HOST} {
+        @callback {
+          method POST
+          path /api/v1/webhooks/conversations /api/v1/webhooks/events/*
+          header X-Session-API-Key *
+        }
+        handle @callback {
+          request_body {
+            max_size 16MB
+          }
+          reverse_proxy app:3000
+        }
+        @operator remote_ip ${MODAL_OPERATOR_CIDR:?Set a trusted operator CIDR}
+        handle @operator {
+          reverse_proxy proxy:80
+        }
+        respond 403
+      }
+      ${MODAL_RUNTIME_HOST} {
+        @operator remote_ip ${MODAL_OPERATOR_CIDR}
+        handle @operator {
+          reverse_proxy modal-gateway:8100
+        }
+        respond 403
+      }
+      ${MODAL_PILOT_SANDBOX_ID}.preview.${WEB_HOST} {
+        @operator remote_ip ${MODAL_OPERATOR_CIDR}
+        handle @operator {
+          reverse_proxy modal-gateway:8100
+        }
+        respond 403
+      }

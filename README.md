@@ -5,6 +5,9 @@ standalone Agent Server controller prototype.
 
 ## Enterprise Canvas pilot
 
+Start with the [Compose setup guide](docs/SETUP.md) and
+[interfaces and design choices](docs/INTERFACES.md).
+
 The [Enterprise overlay](enterprise-pilot/) uses the same managed sandbox
 service, sandbox spec catalog, event callbacks, and Canvas Pause and resume
 APIs as the E2B and DigitalOcean pilots. The Enterprise sandbox and conversation
@@ -55,7 +58,7 @@ seven-day expiry.
 | Persistence | Filesystem snapshots restore files. The preview needs a new process. Modal memory snapshots are a separate alpha capability. |
 | Cleanup | Delete the known test sandbox and account for retained filesystem snapshots. |
 
-Qualify providers using the shared [Canvas acceptance test](../openhands-provider-contract/CANVAS.md). The standalone controller implements workspace restore. See [Modal snapshot behavior](https://modal.com/docs/guide/sandbox-snapshots).
+Qualify providers using the shared [Canvas acceptance test](docs/SETUP.md). The standalone controller implements workspace restore. See [Modal snapshot behavior](https://modal.com/docs/guide/sandbox-snapshots).
 
 
 ## Controller restore check
@@ -71,7 +74,7 @@ process in the guest and removes the runtime and filesystem snapshot.
 python controller_restore_probe.py \
   --app "$MODAL_TEST_APP" \
   --work .private/modal-controller-probe \
-  --preview-probe ../openhands-provider-contract/preview_probe.py
+  --preview-probe validation/preview_probe.py
 ```
 
 The November 21 pilot recovered the file and the original conversation.
@@ -89,7 +92,7 @@ in-memory counter through a temporary HTTPS tunnel.
 ```bash
 python memory_restore_probe.py \
   --app "$MODAL_TEST_APP" \
-  --preview-probe ../openhands-provider-contract/preview_probe.py
+  --preview-probe validation/preview_probe.py
 ```
 
 | Timed operation | Trial 1 | Trial 2 |
