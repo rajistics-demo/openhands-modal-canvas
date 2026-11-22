@@ -12,3 +12,25 @@ This package documents the existing remote Agent Server controller prototype and
 | Cleanup | Delete the known test sandbox and account for retained filesystem snapshots. |
 
 Qualify the existing remote backend using the same observable workflow in the [Canvas acceptance test](../openhands-provider-contract/CANVAS.md). Use a capability label of workspace restore for the current prototype. A native Enterprise Pause test requires an Enterprise adapter. See [Modal snapshot behavior](https://modal.com/docs/guide/sandbox-snapshots).
+
+
+## Controller restore check
+
+Use the installed OpenHands Agent Server checkout that includes the Modal
+conversation controller and a configured Modal profile for your existing
+prototype app. Supply the app name explicitly. The probe creates one
+disposable VM, adds a synthetic history message, hibernates, then reads history
+and resumes the workspace on a replacement VM. It starts a new preview
+process in the guest and removes the runtime and filesystem snapshot.
+
+```bash
+python controller_restore_probe.py \
+  --app "$MODAL_TEST_APP" \
+  --work .private/modal-controller-probe \
+  --preview-probe ../openhands-provider-contract/preview_probe.py
+```
+
+The November 21 pilot recovered the file and the original conversation.
+History was available through the controller in 5 ms while hibernated.
+Reopen through a working preview inside the restored guest took 7.75 s and 10.61 s in two runs.
+A native Enterprise or Canvas browser result remains unverified.
