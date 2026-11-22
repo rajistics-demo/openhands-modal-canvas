@@ -23,7 +23,10 @@ records for `WEB_HOST`, the dedicated runtime hostname, and
 Use a TLS origin that runs Canvas and the Enterprise application, with no
 path in `WEB_URL`, and set `AGENT_CANVAS_LOCK_TO_CLOUD` to that URL. The sample
 edge permits event callbacks and restricts browser and preview access to
-`MODAL_OPERATOR_CIDR`.
+`MODAL_OPERATOR_CIDR`. Enterprise reaches `modal-gateway:8100` directly
+over the Compose network for Agent Server calls. The browser uses the
+public runtime hostname, and a private address never goes into its
+conversation or preview URLs.
 
 Create a random preview signing key with `openssl rand -hex 48`. Put it and the
 Modal profile outside the checkout. The mounted files must be readable by

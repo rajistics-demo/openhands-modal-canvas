@@ -6,7 +6,8 @@ standalone Agent Server controller prototype.
 ## Enterprise Canvas pilot
 
 Start with the [Compose setup guide](docs/SETUP.md) and
-[interfaces and design choices](docs/INTERFACES.md).
+[interfaces and design choices](docs/INTERFACES.md). The [provider status
+record](provider.json) distinguishes the packaged setup from earlier trials.
 
 The [Enterprise overlay](enterprise-pilot/) uses the same managed sandbox
 service, sandbox spec catalog, event callbacks, and Canvas Pause and resume

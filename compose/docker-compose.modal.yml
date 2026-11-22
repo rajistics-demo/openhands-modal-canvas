@@ -5,6 +5,7 @@ x-modal: &modal
   MODAL_PILOT_APP: ${MODAL_PILOT_APP:?Choose the existing Modal app}
   MODAL_PILOT_SANDBOX_ID: ${MODAL_PILOT_SANDBOX_ID:?Choose the single pilot sandbox id}
   MODAL_GATEWAY_URL: https://${MODAL_RUNTIME_HOST:?Set the runtime hostname}
+  MODAL_GATEWAY_INTERNAL_URL: http://modal-gateway:8100
   MODAL_APP_ORIGIN: ${WEB_URL:?Set the HTTPS Enterprise origin}
   MODAL_ENABLE_BROWSER_PREVIEW: "true"
   OH_SANDBOX_WEB_URL: ${WEB_URL}

@@ -13,7 +13,7 @@ from typing import AsyncGenerator, ClassVar
 import httpx
 import modal
 from fastapi import Request
-from pydantic import SecretStr
+from pydantic import Field, SecretStr
 
 from openhands.app_server.errors import SandboxDeleteRetryError, SandboxError
 from openhands.app_server.sandbox.managed_sandbox_service import (
@@ -277,6 +277,12 @@ class ModalSandboxService(ManagedSandboxService):
 
 class ModalSandboxServiceInjector(ManagedSandboxServiceInjector):
     backend: ClassVar[str] = BACKEND
+    gateway_base_url: str = Field(
+        default_factory=lambda: os.environ['MODAL_GATEWAY_URL'].rstrip('/')
+    )
+    internal_url: str | None = Field(
+        default_factory=lambda: os.getenv('MODAL_GATEWAY_INTERNAL_URL')
+    )
 
     async def inject(
         self, state: InjectorState, request: Request | None = None,
@@ -295,7 +301,7 @@ class ModalSandboxServiceInjector(ManagedSandboxServiceInjector):
                 user_context=user, db_session=db, httpx_client=http,
                 max_num_sandboxes=1, sandbox_spec_service=specs,
                 app_origin=get_global_config().web_url or '',
-                gateway=os.environ['MODAL_GATEWAY_URL'].rstrip('/'),
+                gateway=self.gateway_base_url,
                 lifecycle=self.lifecycle,
             )
 
