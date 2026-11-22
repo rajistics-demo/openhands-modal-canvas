@@ -1,0 +1,12 @@
+{
+  "contract_version": 1,
+  "provider": "modal",
+  "package": "openhands-modal-canvas",
+  "native_enterprise": "pending",
+  "resume_semantics": "replacement",
+  "evidence": {
+    "api": "Existing remote Agent Server controller prototype; Enterprise-managed sandbox adapter pending.",
+    "canvas": "Prototype verified conversation access and file recovery. The native Enterprise Pause-button path is pending.",
+    "expiry": "Current filesystem checkpoint prototype restores files on a replacement VM; post-expiry recovery before checkpoint remains unqualified."
+  }
+}
