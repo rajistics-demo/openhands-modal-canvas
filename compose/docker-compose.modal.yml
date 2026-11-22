@@ -41,7 +41,7 @@ services:
     image: ${MODAL_ENTERPRISE_IMAGE:-local/modal-enterprise:1.88.0}
     user: openhands
     entrypoint: []
-    command: [uvicorn, "openhands.app_server.sandbox.modal_gateway:app", "--host", "0.0.0.0", "--port", "8100", "--no-access-log", "--log-level", "warning"]
+    command: [/app/.venv/bin/python, -m, uvicorn, "openhands.app_server.sandbox.modal_gateway:app", "--host", "0.0.0.0", "--port", "8100", "--no-access-log", "--log-level", "warning"]
     environment:
       <<: *modal
       DB_HOST: db
@@ -69,6 +69,11 @@ services:
         bind:
           create_host_path: false
     expose: ["8100"]
+    healthcheck:
+      test: [CMD, /app/.venv/bin/python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8100/alive', timeout=3)"]
+      interval: 5s
+      timeout: 4s
+      retries: 12
     depends_on:
       app:
         condition: service_healthy

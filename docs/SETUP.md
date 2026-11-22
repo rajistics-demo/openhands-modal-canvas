@@ -26,7 +26,8 @@ edge permits event callbacks and restricts browser and preview access to
 `MODAL_OPERATOR_CIDR`. Enterprise reaches `modal-gateway:8100` directly
 over the Compose network for Agent Server calls. The browser uses the
 public runtime hostname, and a private address never goes into its
-conversation or preview URLs.
+conversation or preview URLs. The gateway uses an HTTP readiness check so
+Compose waits for the private listener before reporting success.
 
 Create a random preview signing key with `openssl rand -hex 48`. Put it and the
 Modal profile outside the checkout. The mounted files must be readable by
@@ -55,6 +56,10 @@ docker compose --env-file .env --env-file modal.env \
   -f "$MODAL_PACKAGE/compose/docker-compose.modal.yml" \
   -f "$MODAL_PACKAGE/compose/docker-compose.modal-edge.yml" up -d --wait
 ```
+
+Build and mount the [pinned Canvas pilot](../canvas/README.md) before the
+browser test. This adapter advertises runtime Pause and the pilot accepts
+the authenticated preview origin without a conversation tag.
 
 The catalog lists `modal-agent-server`. The fixture reserves a single
 sandbox so the browser always accesses the correct HTTPS origin. Start a

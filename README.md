@@ -5,6 +5,8 @@ standalone Agent Server controller prototype.
 
 ## Enterprise Canvas pilot
 
+[Build and test the pinned Canvas Pause demo](canvas/README.md).
+
 Start with the [Compose setup guide](docs/SETUP.md) and
 [interfaces and design choices](docs/INTERFACES.md). The [provider status
 record](provider.json) distinguishes the packaged setup from earlier trials.
@@ -14,6 +16,29 @@ service, sandbox spec catalog, event callbacks, and Canvas Pause and resume
 APIs as the E2B and DigitalOcean pilots. The Enterprise sandbox and conversation
 IDs stay stable. The adapter stores the Modal snapshot and rebinds the original
 authenticated Agent Server and preview routes to the replacement VM on resume.
+
+## Packaged Compose replay
+
+The packaged Modal Enterprise overlay and pinned Canvas build ran on an
+isolated AWS Compose host with the existing disposable test account.
+Enterprise reached the Modal gateway over the Compose network. Its container
+received HTTP 403 from the operator-only runtime edge. A native conversation
+event was available in Enterprise history before and during Pause.
+
+| Single Chromium replay | Time |
+|---|---:|
+| Click Pause to settled PAUSED | 9.445 s |
+| Reopen original conversation to history visible | 0.127 s |
+| Reopen original conversation to resume acknowledged | 2.113 s |
+| Reopen original conversation to successful interactive preview check | 5.606 s |
+
+A passive history lookup left the sandbox paused. The preview rejected
+anonymous access, and an authenticated preview read while paused returned
+HTTP 409. The original conversation and stable sandbox binding returned.
+The preview retained its boot marker and in-memory counter on a replacement
+Modal VM. This replay used a single idle conversation and synthetic preview.
+
+## Earlier Canvas trials
 
 Two trials reopened the same original conversation through Chromium running on
 the isolated AWS Compose host. Both used Enterprise 1.88.0, Canvas 1.35.0 with

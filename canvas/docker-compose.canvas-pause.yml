@@ -1,0 +1,9 @@
+services:
+  canvas-server:
+    environment:
+      AGENT_CANVAS_LOCK_TO_CLOUD: ${WEB_URL:?Set the browser-facing HTTPS origin}
+    volumes:
+      - type: bind
+        source: ${CANVAS_PILOT_BUILD:?Set the absolute path to the patched Canvas build}
+        target: /opt/agent-canvas/frontend
+        read_only: true

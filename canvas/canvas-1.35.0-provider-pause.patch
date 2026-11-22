@@ -1,0 +1,1101 @@
+diff --git a/__tests__/components/features/conversation/conversation-name-with-status.test.tsx b/__tests__/components/features/conversation/conversation-name-with-status.test.tsx
+index 0f41ed0..444b803 100644
+--- a/__tests__/components/features/conversation/conversation-name-with-status.test.tsx
++++ b/__tests__/components/features/conversation/conversation-name-with-status.test.tsx
+@@ -13,9 +13,16 @@ import { ExecutionStatus } from "#/types/agent-server/core/base/common";
+ 
+ const mocks = vi.hoisted(() => ({
+   conversationId: "conversation-1" as string | undefined,
++  backendKind: "local" as "local" | "cloud",
+   conversation: {
+     execution_status: "running",
+-  } as { execution_status?: ExecutionStatus | null } | undefined,
++  } as {
++    id?: string;
++    execution_status?: ExecutionStatus | null;
++    sandbox_id?: string;
++    sandbox_status?: string;
++    sandbox_supports_runtime_pause?: boolean;
++  } | undefined,
+   curAgentState: "running" as AgentState,
+   isTask: false,
+   taskStatus: null as string | null,
+@@ -24,6 +31,14 @@ const mocks = vi.hoisted(() => ({
+   providers: [{ name: "provider-1" }],
+ }));
+ 
++vi.mock("#/contexts/active-backend-context", async (importOriginal) => ({
++  ...(await importOriginal<typeof import("#/contexts/active-backend-context")>()),
++  useActiveBackend: () => ({
++    backend: { kind: mocks.backendKind, id: "backend-1" },
++    orgId: "org-1",
++  }),
++}));
++
+ vi.mock("#/hooks/use-conversation-id", () => ({
+   useConversationId: () => ({ conversationId: mocks.conversationId }),
+   useOptionalConversationId: () => ({ conversationId: mocks.conversationId }),
+@@ -160,6 +175,7 @@ describe("conversation name status controls", () => {
+     vi.clearAllMocks();
+     useConversationLaunchStore.setState({ launches: {} });
+     mocks.conversationId = "conversation-1";
++    mocks.backendKind = "local";
+     mocks.conversation = { execution_status: ExecutionStatus.RUNNING };
+     mocks.curAgentState = AgentState.RUNNING;
+     mocks.isTask = false;
+@@ -221,6 +237,55 @@ describe("conversation name status controls", () => {
+     expect(onParentClick).not.toHaveBeenCalled();
+   });
+ 
++  describe("runtime Pause", () => {
++    beforeEach(() => {
++      mocks.backendKind = "cloud";
++      mocks.conversation = {
++        id: "conversation-1",
++        execution_status: ExecutionStatus.IDLE,
++        sandbox_id: "sandbox-1",
++        sandbox_status: "RUNNING",
++        sandbox_supports_runtime_pause: true,
++      };
++    });
++
++    it("pauses the advertised sandbox on the selected Enterprise backend", () => {
++      renderSubject();
++
++      fireEvent.click(screen.getByTestId("pause-cloud-runtime-button"));
++
++      expect(mocks.pauseConversation).toHaveBeenCalledWith({
++        conversationId: "conversation-1",
++        runtime: {
++          sandboxId: "sandbox-1",
++          backendId: "backend-1",
++          orgId: "org-1",
++        },
++      });
++    });
++
++    it.each([
++      { sandbox_supports_runtime_pause: false },
++      { sandbox_supports_runtime_pause: undefined },
++      { id: "previous-conversation" },
++      { sandbox_id: undefined },
++      { sandbox_status: "PAUSED" },
++      { execution_status: ExecutionStatus.RUNNING },
++    ])("hides the button when the current runtime is ineligible (%j)", (patch) => {
++      mocks.conversation = { ...mocks.conversation, ...patch };
++      renderSubject();
++
++      expect(screen.queryByTestId("pause-cloud-runtime-button")).toBeNull();
++    });
++
++    it("hides the runtime button on a local backend", () => {
++      mocks.backendKind = "local";
++      renderSubject();
++
++      expect(screen.queryByTestId("pause-cloud-runtime-button")).toBeNull();
++    });
++  });
++
+   it("resumes a paused conversation with the selected providers", () => {
+     mocks.conversation = { execution_status: ExecutionStatus.PAUSED };
+     mocks.providers = [{ name: "provider-a" }, { name: "provider-b" }];
+diff --git a/__tests__/hooks/mutation/use-unified-stop-conversation.test.tsx b/__tests__/hooks/mutation/use-unified-stop-conversation.test.tsx
+index 6a68741..5c2a39e 100644
+--- a/__tests__/hooks/mutation/use-unified-stop-conversation.test.tsx
++++ b/__tests__/hooks/mutation/use-unified-stop-conversation.test.tsx
+@@ -4,6 +4,10 @@ import { AxiosError } from "axios";
+ import type { ReactNode } from "react";
+ import { beforeEach, describe, expect, it, vi } from "vitest";
+ import { useUnifiedPauseConversation } from "#/hooks/mutation/use-unified-stop-conversation";
++import {
++  __clearCloudAutoResumeSuppressionsForTests,
++  consumeCloudAutoResumeSuppression,
++} from "#/api/cloud/cloud-sandbox-resume-suppression";
+ import { I18nKey } from "#/i18n/declaration";
+ import { ExecutionStatus } from "#/types/agent-server/core";
+ import { TOAST_OPTIONS } from "#/utils/custom-toast-handlers";
+@@ -14,6 +18,7 @@ const {
+   navigationState,
+   patchConversationInCacheMock,
+   pauseConversationMock,
++  pauseCloudSandboxMock,
+   toastDismissMock,
+   toastLoadingMock,
+   toastSuccessMock,
+@@ -24,6 +29,7 @@ const {
+   navigationState: { conversationId: "conversation-1" as string | null },
+   patchConversationInCacheMock: vi.fn(),
+   pauseConversationMock: vi.fn(),
++  pauseCloudSandboxMock: vi.fn(),
+   toastDismissMock: vi.fn(),
+   toastLoadingMock: vi.fn(),
+   toastSuccessMock: vi.fn(),
+@@ -33,6 +39,16 @@ const {
+   })),
+ }));
+ 
++vi.mock("#/api/backend-registry/active-store", () => ({
++  getActiveBackend: () => ({
++    backend: { kind: "cloud", id: "test-backend" },
++    orgId: "test-org",
++  }),
++}));
++vi.mock("#/api/cloud/conversation-service.api", () => ({
++  pauseCloudSandbox: (...args: unknown[]) => pauseCloudSandboxMock(...args),
++}));
++
+ vi.mock("react-hot-toast", () => ({
+   default: {
+     dismiss: (...args: unknown[]) => toastDismissMock(...args),
+@@ -94,6 +110,7 @@ function setup({
+ 
+ beforeEach(() => {
+   vi.clearAllMocks();
++  __clearCloudAutoResumeSuppressionsForTests();
+   navigationState.conversationId = "conversation-1";
+   toastLoadingMock.mockReturnValue("stop-toast");
+   pauseConversationMock.mockResolvedValue({ success: true });
+@@ -144,6 +161,49 @@ describe("useUnifiedPauseConversation", () => {
+     expect(displayErrorToastMock).not.toHaveBeenCalled();
+   });
+ 
++  it("suppresses mounted-route auto resume before the direct sandbox pause", async () => {
++    pauseCloudSandboxMock.mockImplementation(async () => {
++      expect(consumeCloudAutoResumeSuppression("conversation-1")).toBe(true);
++    });
++    const { result } = setup();
++
++    await act(async () => {
++      await result.current.mutateAsync({
++        conversationId: "conversation-1",
++        runtime: {
++          sandboxId: "vm-1",
++          backendId: "test-backend",
++          orgId: "test-org",
++        },
++      });
++    });
++
++    expect(pauseCloudSandboxMock).toHaveBeenCalledExactlyOnceWith("vm-1");
++    expect(pauseConversationMock).not.toHaveBeenCalled();
++    expect(navigateMock).toHaveBeenCalledWith("/conversations");
++  });
++
++  it("clears suppression when the explicit pause fails", async () => {
++    pauseCloudSandboxMock.mockRejectedValueOnce(new Error("provider refused"));
++    const { result } = setup();
++
++    await expect(
++      act(async () =>
++        result.current.mutateAsync({
++          conversationId: "conversation-1",
++          runtime: {
++            sandboxId: "vm-1",
++            backendId: "test-backend",
++            orgId: "test-org",
++          },
++        }),
++      ),
++    ).rejects.toThrow("provider refused");
++
++    expect(consumeCloudAutoResumeSuppression("conversation-1")).toBe(false);
++    expect(navigateMock).not.toHaveBeenCalled();
++  });
++
+   it("does not dismiss a missing toast or navigate away from another conversation", async () => {
+     toastLoadingMock.mockReturnValue("");
+     const { queryClient, result } = setup({
+diff --git a/__tests__/routes/conversation-backend-switch.test.tsx b/__tests__/routes/conversation-backend-switch.test.tsx
+index 9e70c51..7a57911 100644
+--- a/__tests__/routes/conversation-backend-switch.test.tsx
++++ b/__tests__/routes/conversation-backend-switch.test.tsx
+@@ -15,7 +15,10 @@ import {
+ import { ActiveBackendProvider } from "#/contexts/active-backend-context";
+ import { NavigationProvider } from "#/context/navigation-context";
+ import ConversationView from "#/routes/conversation";
+-import { resumeCloudSandbox } from "#/api/cloud/conversation-service.api";
++import {
++  recoverCloudConversationRuntime,
++  resumeCloudSandbox,
++} from "#/api/cloud/conversation-service.api";
+ import {
+   __clearCloudAutoResumeSuppressionsForTests,
+   suppressNextCloudAutoResume,
+@@ -27,6 +30,7 @@ import { usePendingTaskAttachmentsStore } from "#/stores/pending-task-attachment
+ import { useOptimisticUserMessageStore } from "#/stores/optimistic-user-message-store";
+ import { useConversationStore } from "#/stores/conversation-store";
+ import { useErrorMessageStore } from "#/stores/error-message-store";
++import { CONVERSATION_QUERY_KEYS } from "#/hooks/query/query-keys";
+ import { displayErrorToast } from "#/utils/custom-toast-handlers";
+ 
+ // Mock the underlying service the conversation queries depend on.
+@@ -72,6 +76,7 @@ vi.mock("#/hooks/query/use-is-authed", () => ({
+   useIsAuthed: () => ({ data: true }),
+ }));
+ vi.mock("#/api/cloud/conversation-service.api", () => ({
++  recoverCloudConversationRuntime: vi.fn(),
+   resumeCloudSandbox: vi.fn(),
+ }));
+ // Mock the cloud sharing service the read-only fallback probes.
+@@ -230,6 +235,8 @@ beforeEach(() => {
+   vi.mocked(
+     AgentServerConversationService.batchGetAppConversations,
+   ).mockReset();
++  vi.mocked(recoverCloudConversationRuntime).mockReset();
++  vi.mocked(recoverCloudConversationRuntime).mockResolvedValue(undefined);
+   vi.mocked(resumeCloudSandbox).mockReset();
+   vi.mocked(resumeCloudSandbox).mockResolvedValue(undefined);
+   vi.mocked(
+@@ -298,6 +305,117 @@ describe("conversation route — backend switch", () => {
+   });
+ });
+ 
++describe("conversation route — expired cloud runtime recovery", () => {
++  it("requests recovery once for the original eligible conversation", async () => {
++    setActiveSelection({ backendId: cloudBackend.id, orgId: "org-a" });
++    const initial = makeConversation(CLOUD_CONVERSATION_ID, {
++      sandbox_status: "MISSING",
++      sandbox_id: "expired-vm",
++      recovery_available: true,
++    });
++    const restored = {
++      ...initial,
++      sandbox_status: "RUNNING" as const,
++      sandbox_id: "replacement-vm",
++    };
++    const lookup = vi.mocked(
++      AgentServerConversationService.batchGetAppConversations,
++    );
++    lookup.mockResolvedValue([initial]);
++    vi.mocked(recoverCloudConversationRuntime).mockImplementationOnce(
++      async () => {
++        lookup.mockResolvedValue([restored]);
++      },
++    );
++
++    renderConversation();
++
++    await waitFor(() =>
++      expect(recoverCloudConversationRuntime).toHaveBeenCalledWith(
++        CLOUD_CONVERSATION_ID,
++        "org-a",
++      ),
++    );
++    await waitFor(() => expect(lookup.mock.calls.length).toBeGreaterThan(1));
++    expect(recoverCloudConversationRuntime).toHaveBeenCalledTimes(1);
++    expect(resumeCloudSandbox).not.toHaveBeenCalled();
++    expect(screen.getByTestId("conversation-main")).toBeInTheDocument();
++  });
++
++  it("checks current state when returning to a cached running conversation", async () => {
++    setActiveSelection({ backendId: cloudBackend.id, orgId: "org-a" });
++    queryClient.setQueryData(
++      CONVERSATION_QUERY_KEYS.detail(
++        CLOUD_CONVERSATION_ID,
++        cloudBackend.id,
++        "org-a",
++      ),
++      makeConversation(CLOUD_CONVERSATION_ID, { sandbox_status: "RUNNING" }),
++    );
++    vi.mocked(
++      AgentServerConversationService.batchGetAppConversations,
++    ).mockResolvedValue([
++      makeConversation(CLOUD_CONVERSATION_ID, {
++        sandbox_status: "MISSING",
++        recovery_available: true,
++      }),
++    ]);
++
++    renderConversation();
++
++    await waitFor(() =>
++      expect(recoverCloudConversationRuntime).toHaveBeenCalledWith(
++        CLOUD_CONVERSATION_ID,
++        "org-a",
++      ),
++    );
++    expect(recoverCloudConversationRuntime).toHaveBeenCalledTimes(1);
++  });
++
++  it("retains archived history without recovery when the backend omits the capability", async () => {
++    setActiveSelection({ backendId: cloudBackend.id, orgId: "org-a" });
++    vi.mocked(
++      AgentServerConversationService.batchGetAppConversations,
++    ).mockResolvedValue([
++      makeConversation(CLOUD_CONVERSATION_ID, { sandbox_status: "MISSING" }),
++    ]);
++
++    renderConversation();
++
++    expect(await screen.findByTestId("conversation-main")).toBeInTheDocument();
++    expect(recoverCloudConversationRuntime).not.toHaveBeenCalled();
++    expect(resumeCloudSandbox).not.toHaveBeenCalled();
++  });
++
++  it("does not start recovery when a running tab later polls as expired", async () => {
++    setActiveSelection({ backendId: cloudBackend.id, orgId: "org-a" });
++    const initial = makeConversation(CLOUD_CONVERSATION_ID, {
++      sandbox_status: "RUNNING",
++      recovery_available: true,
++    });
++    vi.mocked(
++      AgentServerConversationService.batchGetAppConversations,
++    ).mockResolvedValue([initial]);
++
++    renderConversation();
++
++    await waitFor(() =>
++      expect(
++        queryClient.getQueriesData<AppConversation>({
++          queryKey: ["user", "conversation", CLOUD_CONVERSATION_ID],
++        })[0]?.[1]?.sandbox_status,
++      ).toBe("RUNNING"),
++    );
++    await act(async () => {
++      queryClient.setQueriesData<AppConversation>(
++        { queryKey: ["user", "conversation", CLOUD_CONVERSATION_ID] },
++        (data) => data && { ...data, sandbox_status: "MISSING" },
++      );
++    });
++    expect(recoverCloudConversationRuntime).not.toHaveBeenCalled();
++  });
++});
++
+ describe("conversation route — cloud sandbox resume", () => {
+   it("resumes an already-paused cloud sandbox when the conversation is opened", async () => {
+     setActiveSelection({ backendId: cloudBackend.id, orgId: "org-a" });
+diff --git a/src/api/cloud/conversation-service.api.ts b/src/api/cloud/conversation-service.api.ts
+index e3e2568..2494edf 100644
+--- a/src/api/cloud/conversation-service.api.ts
++++ b/src/api/cloud/conversation-service.api.ts
+@@ -298,6 +298,22 @@ export async function pauseCloudSandbox(sandboxId: string): Promise<void> {
+   });
+ }
+ 
++export async function recoverCloudConversationRuntime(
++  conversationId: string,
++  orgId: string,
++): Promise<void> {
++  const { backend, orgId: activeOrg } = getActiveBackend();
++  if (backend.kind !== "cloud" || activeOrg !== orgId) {
++    throw new Error("The recovery organization is no longer selected.");
++  }
++  await callCloudProxy({
++    backend,
++    method: "POST",
++    path: `/api/v1/app-conversations/${conversationId}/runtime/recover`,
++    timeoutSeconds: 120,
++  });
++}
++
+ /**
+  * Resume a paused cloud sandbox. Mirrors OpenHands' `SandboxService.resumeSandbox`
+  * by calling `POST /api/v1/sandboxes/{sandboxId}/resume` on the SaaS.
+diff --git a/src/api/conversation-service/agent-server-conversation-service.types.ts b/src/api/conversation-service/agent-server-conversation-service.types.ts
+index 20c569e..79f47d5 100644
+--- a/src/api/conversation-service/agent-server-conversation-service.types.ts
++++ b/src/api/conversation-service/agent-server-conversation-service.types.ts
+@@ -220,6 +220,9 @@ export interface AppConversation {
+    * Absent / null for local agent-server conversations.
+    */
+   sandbox_status?: SandboxStatus | null;
++  /** Native runtime pause/resume advertised by Enterprise for this sandbox. */
++  sandbox_supports_runtime_pause?: boolean;
++  recovery_available?: boolean;
+   conversation_url: string | null;
+   session_api_key: string | null;
+   sandbox_id: string | null;
+diff --git a/src/components/features/conversation-panel/conversation-panel.tsx b/src/components/features/conversation-panel/conversation-panel.tsx
+index 45d214e..433646b 100644
+--- a/src/components/features/conversation-panel/conversation-panel.tsx
++++ b/src/components/features/conversation-panel/conversation-panel.tsx
+@@ -225,6 +225,7 @@ export function ConversationPanel({
+     (conversation: {
+       id: string;
+       sandbox_status?: SandboxStatus | null;
++      recovery_available?: boolean;
+       tags?: Record<string, string> | null;
+     }) =>
+       isEffectivelyArchivedConversation(
+@@ -233,6 +234,7 @@ export function ConversationPanel({
+           conversation.tags,
+           ARCHIVED_CONVERSATION_TAG_KEY,
+         ),
++        conversation.recovery_available,
+       ),
+     [],
+   );
+diff --git a/src/components/features/conversation/conversation-name-with-status.tsx b/src/components/features/conversation/conversation-name-with-status.tsx
+index 61ded1d..fcdfe1d 100644
+--- a/src/components/features/conversation/conversation-name-with-status.tsx
++++ b/src/components/features/conversation/conversation-name-with-status.tsx
+@@ -1,4 +1,6 @@
+ import React from "react";
++import { useActiveBackend } from "#/contexts/active-backend-context";
++import { ExecutionStatus } from "#/types/agent-server/core";
+ import { useConversationLaunchStore } from "#/stores/conversation-launch-store";
+ import { OH_STATUS_ERROR_COLOR } from "#/constants/status-colors";
+ import { useTranslation } from "react-i18next";
+@@ -34,7 +36,9 @@ export function ConversationNameWithStatus() {
+   const { data: conversation } = useActiveConversation();
+   const { curAgentState } = useAgentState();
+   const { isTask, taskStatus } = useTaskPolling();
+-  const { mutate: pauseConversation } = useUnifiedPauseConversation();
++  const { mutate: pauseConversation, isPending: pausePending } =
++    useUnifiedPauseConversation();
++  const { backend, orgId } = useActiveBackend();
+   const { mutate: resumeConversation } = useUnifiedResumeConversation();
+   const { providers } = useUserProviders();
+   const [menuOpen, setMenuOpen] = React.useState(false);
+@@ -42,6 +46,15 @@ export function ConversationNameWithStatus() {
+   const triggerRef = React.useRef<HTMLButtonElement>(null);
+ 
+   const executionStatus = conversation?.execution_status ?? null;
++  const canPauseRuntime =
++    backend.kind === "cloud" &&
++    conversation?.sandbox_supports_runtime_pause === true &&
++    conversation?.id === conversationId &&
++    conversation?.sandbox_status === "RUNNING" &&
++    !!conversation.sandbox_id &&
++    (executionStatus === ExecutionStatus.IDLE ||
++      executionStatus === ExecutionStatus.FINISHED);
++
+   const isStartingStatus =
+     !conversation ||
+     curAgentState === AgentState.LOADING ||
+@@ -161,6 +174,27 @@ export function ConversationNameWithStatus() {
+         <ConversationName />
+       </div>
+       <div className="mr-2 flex shrink-0 items-center gap-1">
++        {canPauseRuntime && conversationId && conversation?.sandbox_id && (
++          <button
++            type="button"
++            data-testid="pause-cloud-runtime-button"
++            className="rounded-md px-2 py-1 text-sm text-foreground hover:bg-contrast/10 disabled:opacity-50"
++            disabled={pausePending}
++            onClick={() => {
++              if (!conversation.sandbox_id) return;
++              pauseConversation({
++                conversationId,
++                runtime: {
++                  sandboxId: conversation.sandbox_id,
++                  backendId: backend.id,
++                  orgId,
++                },
++              });
++            }}
++          >
++            {t(I18nKey.COMMON$PAUSE_RUNTIME)}
++          </button>
++        )}
+         <ConversationGitActionsToggle />
+         <ConversationOverviewToggle />
+         <RightPanelToggle />
+diff --git a/src/hooks/mutation/use-unified-stop-conversation.ts b/src/hooks/mutation/use-unified-stop-conversation.ts
+index 574a977..46f1444 100644
+--- a/src/hooks/mutation/use-unified-stop-conversation.ts
++++ b/src/hooks/mutation/use-unified-stop-conversation.ts
+@@ -1,3 +1,10 @@
++import { useEffect, useRef } from "react";
++import { getActiveBackend } from "#/api/backend-registry/active-store";
++import { pauseCloudSandbox } from "#/api/cloud/conversation-service.api";
++import {
++  clearCloudAutoResumeSuppression,
++  suppressNextCloudAutoResume,
++} from "#/api/cloud/cloud-sandbox-resume-suppression";
+ import { useMutation, useQueryClient } from "@tanstack/react-query";
+ import toast from "react-hot-toast";
+ import { useTranslation } from "react-i18next";
+@@ -13,18 +20,52 @@ import {
+   patchConversationInCache,
+ } from "./conversation-mutation-utils";
+ 
++type PauseVariables = {
++  conversationId: string;
++  runtime?: { sandboxId: string; backendId: string; orgId: string | null };
++};
++
++function isSelectedRuntimeScope(
++  runtime: NonNullable<PauseVariables["runtime"]>,
++) {
++  const { backend, orgId } = getActiveBackend();
++  return (
++    backend.kind === "cloud" &&
++    backend.id === runtime.backendId &&
++    orgId === runtime.orgId
++  );
++}
++
+ export const useUnifiedPauseConversation = () => {
+   const { t } = useTranslation("openhands");
+   const queryClient = useQueryClient();
+   const { conversationId: currentConversationId, navigate } = useNavigation();
+ 
++  const currentRoute = useRef(currentConversationId);
++  useEffect(() => {
++    currentRoute.current = currentConversationId;
++  }, [currentConversationId]);
++
+   return useMutation({
+     mutationKey: ["stop-conversation"],
+-    mutationFn: async (variables: { conversationId: string }) =>
+-      pauseConversation(variables.conversationId),
+-    onMutate: async () => {
++    mutationFn: async ({ conversationId, runtime }: PauseVariables) => {
++      if (!runtime) return pauseConversation(conversationId);
++      if (!isSelectedRuntimeScope(runtime)) {
++        throw new Error("The selected cloud workspace changed before pause.");
++      }
++      await pauseCloudSandbox(runtime.sandboxId);
++      return { success: true };
++    },
++    onMutate: async ({ conversationId, runtime }) => {
++      if (runtime && currentRoute.current === conversationId) {
++        suppressNextCloudAutoResume(conversationId);
++      }
+       const toastId = toast.loading(
+-        t(I18nKey.TOAST$STOPPING_CONVERSATION),
++        t(
++          runtime
++            ? I18nKey.TOAST$PAUSING_RUNTIME
++            : I18nKey.TOAST$STOPPING_CONVERSATION,
++        ),
+         TOAST_OPTIONS,
+       );
+ 
+@@ -36,11 +77,19 @@ export const useUnifiedPauseConversation = () => {
+ 
+       return { previousConversations, toastId };
+     },
+-    onError: (_, __, context) => {
++    onError: (_, variables, context) => {
++      if (variables.runtime)
++        clearCloudAutoResumeSuppression(variables.conversationId);
+       if (context?.toastId) {
+         toast.dismiss(context.toastId);
+       }
+-      displayErrorToast(t(I18nKey.TOAST$FAILED_TO_STOP_CONVERSATION));
++      displayErrorToast(
++        t(
++          variables.runtime
++            ? I18nKey.TOAST$FAILED_TO_PAUSE_RUNTIME
++            : I18nKey.TOAST$FAILED_TO_STOP_CONVERSATION,
++        ),
++      );
+ 
+       if (context?.previousConversations) {
+         queryClient.setQueryData(
+@@ -53,7 +102,16 @@ export const useUnifiedPauseConversation = () => {
+       if (context?.toastId) {
+         toast.dismiss(context.toastId);
+       }
+-      toast.success(t(I18nKey.TOAST$CONVERSATION_STOPPED), TOAST_OPTIONS);
++      toast.success(
++        t(
++          variables.runtime
++            ? I18nKey.TOAST$RUNTIME_PAUSED
++            : I18nKey.TOAST$CONVERSATION_STOPPED,
++        ),
++        TOAST_OPTIONS,
++      );
++      if (variables.runtime && !isSelectedRuntimeScope(variables.runtime))
++        return;
+ 
+       // Drop the runtime URL immediately so this mounted route cannot reconnect
+       // to the sandbox being paused. Leave sandbox_status server-authored: the
+@@ -64,7 +122,7 @@ export const useUnifiedPauseConversation = () => {
+         conversation_url: null,
+       });
+ 
+-      if (currentConversationId === variables.conversationId) {
++      if (currentRoute.current === variables.conversationId) {
+         navigate("/conversations");
+       }
+     },
+diff --git a/src/i18n/translation.json b/src/i18n/translation.json
+index 7f35147..140df8a 100644
+--- a/src/i18n/translation.json
++++ b/src/i18n/translation.json
+@@ -1,4 +1,16 @@
+ {
++  "COMMON$PAUSE_RUNTIME": {
++    "en": "Pause"
++  },
++  "TOAST$PAUSING_RUNTIME": {
++    "en": "Pausing runtime…"
++  },
++  "TOAST$RUNTIME_PAUSED": {
++    "en": "Runtime paused"
++  },
++  "TOAST$FAILED_TO_PAUSE_RUNTIME": {
++    "en": "Could not pause the runtime"
++  },
+   "CHAT_INTERFACE$TIMESTAMP_JUST_NOW": {
+     "en": "Just now",
+     "ja": "たった今",
+diff --git a/src/routes/conversation.tsx b/src/routes/conversation.tsx
+index 85ca7dc..198706f 100644
+--- a/src/routes/conversation.tsx
++++ b/src/routes/conversation.tsx
+@@ -1,3 +1,4 @@
++import { PilotRecoveredPreview } from "#/components/features/conversation/pilot-recovered-preview";
+ import { usePendingTaskAttachmentsStore } from "#/stores/pending-task-attachments-store";
+ import { restoreStartupAttachmentDraft } from "#/utils/restore-startup-attachment-draft";
+ import { CONVERSATION_LAUNCH_PREFIX } from "#/stores/conversation-launch-store";
+@@ -34,6 +35,7 @@ import { ConversationOverviewDrawerProvider } from "#/components/features/conver
+ import { WebSocketProviderWrapper } from "#/contexts/websocket-provider-wrapper";
+ import { useErrorMessageStore } from "#/stores/error-message-store";
+ import { I18nKey } from "#/i18n/declaration";
++import { useCloudConversationRecovery } from "#/hooks/mutation/use-cloud-conversation-recovery";
+ import { useCloudSandboxAutoResume } from "#/hooks/mutation/use-cloud-sandbox-auto-resume";
+ 
+ function AppContent() {
+@@ -77,7 +79,13 @@ function AppContent() {
+     owner.current.backendId !== active.backend.id ||
+     owner.current.orgId !== active.orgId;
+ 
+-  const { data: conversation, isFetched, isSuccess } = useActiveConversation();
++  const {
++    data: conversation,
++    isFetched,
++    isSuccess,
++    isFetchedAfterMount,
++    refetch,
++  } = useActiveConversation();
+   const { data: isAuthed } = useIsAuthed();
+   const { resetConversationState } = useConversationStore();
+   const resetConversationRuntimeState = useConversationStateStore(
+@@ -212,6 +220,16 @@ function AppContent() {
+     setLastConversationId(active.backend.id, active.orgId, conversationId);
+   }, [conversationId, backendChanged, active.backend.id, active.orgId]);
+ 
++  useCloudConversationRecovery({
++    backendChanged,
++    active,
++    conversation,
++    conversationId,
++    isFetched,
++    isFetchedAfterMount,
++    refetch,
++  });
++
+   useCloudSandboxAutoResume({
+     backendChanged,
+     backendKind: active.backend.kind,
+@@ -245,7 +263,10 @@ function AppContent() {
+               }
+             />
+           ) : (
+-            <ConversationMain />
++            <>
++              <ConversationMain />
++              <PilotRecoveredPreview conversation={conversation} active={active} />
++            </>
+           )}
+         </div>
+       </ConversationOverviewDrawerProvider>
+diff --git a/src/utils/conversation-archive-status.ts b/src/utils/conversation-archive-status.ts
+index 6ce618d..d0d000e 100644
+--- a/src/utils/conversation-archive-status.ts
++++ b/src/utils/conversation-archive-status.ts
+@@ -32,7 +32,7 @@ export function isRuntimeUnavailableSandboxStatus(
+ /**
+  * The single "effective archived" predicate: a conversation is archived when
+  * the user explicitly archived it, or when its runtime is missing and
+- * non-resumable. Drives the archived presentation (list visibility, the
++ * no recovery checkpoint is available. Drives the archived presentation (list visibility, the
+  * "Archived" chip, the dimmed title, and the status dot) so those never
+  * disagree.
+  *
+@@ -43,6 +43,10 @@ export function isRuntimeUnavailableSandboxStatus(
+ export function isEffectivelyArchivedConversation(
+   sandboxStatus: SandboxStatus | null | undefined,
+   explicitlyArchived: boolean,
++  recoveryAvailable = false,
+ ): boolean {
+-  return explicitlyArchived || isMissingSandboxStatus(sandboxStatus);
++  return (
++    explicitlyArchived ||
++    (isMissingSandboxStatus(sandboxStatus) && !recoveryAvailable)
++  );
+ }
+--- /dev/null
++++ b/src/components/features/conversation/pilot-recovered-preview.tsx
+@@ -0,0 +1,129 @@
++import { useEffect, useState } from "react";
++import { useQuery } from "@tanstack/react-query";
++import type { ResolvedActiveBackend } from "#/api/backend-registry/types";
++import { batchGetCloudSandboxes } from "#/api/cloud/sandbox-service.api";
++import type { AppConversation } from "#/api/conversation-service/agent-server-conversation-service.types";
++
++const PREVIEW_SESSION_PATH = "/.well-known/openhands-preview-session";
++const PREVIEW_RENEW_MS = 4 * 60 * 1000;
++
++function previewTarget(
++  url: string,
++  appOrigin: string,
++  sandboxId: string,
++  allowPilot: boolean,
++) {
++  let src: URL;
++  try {
++    src = new URL(url);
++  } catch {
++    return null;
++  }
++  if (src.search || src.hash || src.username || src.password) return null;
++
++  const app = new URL(appOrigin);
++  if (
++    app.protocol === "https:" &&
++    /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/.test(sandboxId) &&
++    src.origin === `https://${sandboxId}.preview.${app.hostname}` &&
++    src.pathname === "/"
++  ) {
++    return { href: src.href, credentialed: true };
++  }
++
++  if (!allowPilot) return null;
++  const aws =
++    src.origin === `https://runtime-repo.${app.host}` &&
++    src.pathname.replace(/\/$/, "") === `/${sandboxId}/8011`;
++  const e2b =
++    /^[a-z0-9]+$/.test(sandboxId) &&
++    src.origin === `https://8011-${sandboxId}.e2b.app` &&
++    src.pathname === "/";
++  if (!aws && !e2b) return null;
++  if (!src.pathname.endsWith("/")) src.pathname += "/";
++  return { href: src.href, credentialed: false };
++}
++
++function usePreviewSession(origin: string | undefined, key: string | undefined) {
++  const [authorizedOrigin, setAuthorizedOrigin] = useState<string>();
++  useEffect(() => {
++    setAuthorizedOrigin(undefined);
++    if (!origin || !key) return undefined;
++
++    const controller = new AbortController();
++    const authorize = async () => {
++      try {
++        const response = await fetch(new URL(PREVIEW_SESSION_PATH, origin), {
++          method: "POST",
++          headers: { "X-Session-API-Key": key },
++          credentials: "include",
++          redirect: "error",
++          signal: controller.signal,
++        });
++        if (!controller.signal.aborted) {
++          setAuthorizedOrigin(response.status === 204 ? origin : undefined);
++        }
++      } catch {
++        if (!controller.signal.aborted) setAuthorizedOrigin(undefined);
++      }
++    };
++
++    void authorize();
++    const renewal = window.setInterval(authorize, PREVIEW_RENEW_MS);
++    return () => {
++      controller.abort();
++      window.clearInterval(renewal);
++    };
++  }, [origin, key]);
++
++  return !!key && authorizedOrigin === origin;
++}
++
++export function PilotRecoveredPreview({
++  conversation,
++  active,
++}: {
++  conversation: Pick<
++    AppConversation,
++    "sandbox_id" | "sandbox_status" | "tags" | "session_api_key"
++  > | null | undefined;
++  active: ResolvedActiveBackend;
++}) {
++  const appOrigin = typeof window === "undefined" ? undefined : window.location.origin;
++  const sandboxId = conversation?.sandbox_id;
++  const enabled =
++    !!appOrigin &&
++    active.backend.kind === "cloud" &&
++    active.backend.host === appOrigin &&
++    conversation?.sandbox_status === "RUNNING" &&
++    !!sandboxId;
++  const allowPilot =
++    import.meta.env.VITE_CANVAS_RECOVERY_PILOT_ORIGIN === appOrigin &&
++    conversation?.tags?.canvasrecoverypilotpreview === "true";
++  const sandbox = useQuery({
++    queryKey: ["canvas-workspace-preview", active.backend.id, active.orgId, sandboxId],
++    enabled,
++    queryFn: async () => (await batchGetCloudSandboxes([sandboxId!]))[0],
++  });
++  const preview = sandbox.data?.exposed_urls?.find(({ name }) => name === "WORKER_1");
++  const target =
++    enabled && preview && sandbox.data?.id === sandboxId
++      ? previewTarget(preview.url, appOrigin, sandboxId, allowPilot)
++      : null;
++  const authorized = usePreviewSession(
++    target?.credentialed ? target.href : undefined,
++    conversation?.session_api_key ?? undefined,
++  );
++
++  if (!target || (target.credentialed && !authorized)) return null;
++  return (
++    <iframe
++      title="Live workspace preview"
++      data-testid="canvas-pilot-live-preview"
++      src={target.href}
++      referrerPolicy="no-referrer"
++      sandbox="allow-scripts allow-same-origin"
++      className="h-64 w-full shrink-0 border-t"
++    />
++  );
++}
+--- /dev/null
++++ b/src/hooks/mutation/use-cloud-conversation-recovery.ts
+@@ -0,0 +1,118 @@
++import { useEffect, useRef } from "react";
++import { useQueryClient } from "@tanstack/react-query";
++import { useTranslation } from "react-i18next";
++import { getActiveBackend } from "#/api/backend-registry/active-store";
++import type { ResolvedActiveBackend } from "#/api/backend-registry/types";
++import { recoverCloudConversationRuntime } from "#/api/cloud/conversation-service.api";
++import type { AppConversation } from "#/api/conversation-service/agent-server-conversation-service.types";
++import {
++  useSessionActivityStore,
++  sessionActivityKey,
++} from "#/stores/session-activity-store";
++import { I18nKey } from "#/i18n/declaration";
++import { displayErrorToast } from "#/utils/custom-toast-handlers";
++import { invalidateConversationQueries } from "./conversation-mutation-utils";
++
++interface CloudConversationRecoveryOptions {
++  backendChanged: boolean;
++  active: ResolvedActiveBackend;
++  conversation: AppConversation | null | undefined;
++  conversationId: string;
++  isFetched: boolean;
++  isFetchedAfterMount: boolean;
++  refetch: () => Promise<{ data: AppConversation | null | undefined }>;
++}
++
++export function useCloudConversationRecovery({
++  backendChanged,
++  active,
++  conversation,
++  conversationId,
++  isFetched,
++  isFetchedAfterMount,
++  refetch,
++}: CloudConversationRecoveryOptions) {
++  const { t } = useTranslation("openhands");
++  const queryClient = useQueryClient();
++  const lastOpen = useRef<string | null>(null);
++  const activeScope = useRef<string | null>(null);
++  const { backend, orgId } = active;
++  const scope = sessionActivityKey(backend.id, orgId, conversationId);
++
++  useEffect(() => {
++    if (lastOpen.current !== scope) lastOpen.current = null;
++    activeScope.current = backendChanged ? null : scope;
++    return () => {
++      activeScope.current = null;
++    };
++  }, [backendChanged, scope]);
++
++  useEffect(() => {
++    if (
++      backendChanged ||
++      backend.kind !== "cloud" ||
++      !orgId ||
++      !isFetched ||
++      conversation?.id !== conversationId ||
++      lastOpen.current === scope
++    ) {
++      return;
++    }
++
++    // Reading a conversation again is user intent. Polling an open tab is not.
++    lastOpen.current = scope;
++    if (isFetchedAfterMount && conversation.recovery_available !== true) return;
++
++    const recoveryOrg = orgId;
++    const isCurrent = () => {
++      const current = getActiveBackend();
++      return (
++        activeScope.current === scope &&
++        current.backend.id === backend.id &&
++        current.orgId === orgId
++      );
++    };
++
++    async function recover() {
++      const latest = isFetchedAfterMount
++        ? conversation
++        : (await refetch().catch(() => null))?.data;
++      if (
++        !isCurrent() ||
++        latest?.recovery_available !== true ||
++        latest.sandbox_status !== "MISSING"
++      ) {
++        return;
++      }
++
++      useSessionActivityStore.getState().begin(scope, "resume");
++      try {
++        await recoverCloudConversationRuntime(conversationId, recoveryOrg);
++      } catch {
++        if (isCurrent()) {
++          useSessionActivityStore.getState().observe(scope, "ERROR");
++          displayErrorToast(t(I18nKey.CONVERSATION$FAILED_TO_START_FROM_TASK));
++        }
++        return;
++      }
++
++      if (isCurrent())
++        invalidateConversationQueries(queryClient, conversationId);
++    }
++
++    void recover();
++  }, [
++    backendChanged,
++    backend.id,
++    backend.kind,
++    orgId,
++    conversation,
++    conversationId,
++    isFetched,
++    isFetchedAfterMount,
++    queryClient,
++    refetch,
++    scope,
++    t,
++  ]);
++}
+--- /dev/null
++++ b/src/utils/canvas-recovery-pilot.ts
+@@ -0,0 +1,14 @@
++/** Enable the Pause action for the selected cloud backend on the pilot origin. */
++export function isCanvasRecoveryPilotOrigin(
++  backendHost: string,
++  pageOrigin: string = globalThis.location?.origin,
++): boolean {
++  const configuredOrigin = import.meta.env.VITE_CANVAS_RECOVERY_PILOT_ORIGIN;
++  if (!configuredOrigin || !pageOrigin) return false;
++  try {
++    const origin = new URL(configuredOrigin).origin;
++    return pageOrigin === origin && new URL(backendHost).origin === origin;
++  } catch {
++    return false;
++  }
++}
+--- /dev/null
++++ b/__tests__/components/features/conversation/pilot-recovered-preview.test.tsx
+@@ -0,0 +1,107 @@
++// @vitest-environment-options {"url":"https://app.example.test/"}
++import { render, screen, waitFor } from "@testing-library/react";
++import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
++import type { ResolvedActiveBackend } from "#/api/backend-registry/types";
++import type { AppConversation } from "#/api/conversation-service/agent-server-conversation-service.types";
++import { PilotRecoveredPreview } from "#/components/features/conversation/pilot-recovered-preview";
++
++const fixture = vi.hoisted(() => ({ url: "" }));
++vi.mock("@tanstack/react-query", () => ({
++  useQuery: () => ({
++    data: {
++      id: "sandboxabc",
++      exposed_urls: [{ name: "WORKER_1", url: fixture.url }],
++    },
++  }),
++}));
++
++const active = {
++  backend: { id: "pilot", kind: "cloud", host: window.location.origin },
++  orgId: "pilot-org",
++} as ResolvedActiveBackend;
++const conversation = {
++  sandbox_id: "sandboxabc",
++  sandbox_status: "RUNNING",
++  session_api_key: null,
++  tags: { canvasrecoverypilotpreview: "true" },
++} satisfies Pick<AppConversation, "sandbox_id" | "sandbox_status" | "tags" | "session_api_key">;
++
++describe("PilotRecoveredPreview", () => {
++  beforeEach(() => {
++    vi.stubEnv("VITE_CANVAS_RECOVERY_PILOT_ORIGIN", window.location.origin);
++  });
++
++  afterEach(() => {
++    vi.unstubAllEnvs();
++    vi.unstubAllGlobals();
++  });
++
++  it("embeds the E2B preview bound to this sandbox and worker port", () => {
++    fixture.url = "https://8011-sandboxabc.e2b.app/";
++    render(<PilotRecoveredPreview conversation={conversation} active={active} />);
++
++    expect(screen.getByTitle("Live workspace preview")).toHaveAttribute(
++      "src",
++      fixture.url,
++    );
++  });
++
++  it.each([
++    "https://8011-othersandbox.e2b.app/",
++    "https://8000-sandboxabc.e2b.app/",
++    "https://8011-sandboxabc.e2b.app.invalid/",
++    "https://8011-sandboxabc.e2b.app/?key=synthetic",
++    "https://8011-sandboxabc.e2b.app/unexpected",
++    "invalid URL",
++    "https://other.preview.app.example.test/",
++  ])("rejects %s", (url) => {
++    fixture.url = url;
++    render(<PilotRecoveredPreview conversation={conversation} active={active} />);
++
++    expect(screen.queryByTitle("Live workspace preview")).toBeNull();
++  });
++});
++
++
++describe("credentialed MARS preview", () => {
++  afterEach(() => vi.unstubAllGlobals());
++
++  it("exchanges the sandbox key only on the matching preview origin before mounting", async () => {
++    fixture.url = "https://sandboxabc.preview.app.example.test/";
++    const grant = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
++    vi.stubGlobal("fetch", grant);
++
++    render(
++      <PilotRecoveredPreview
++        conversation={{ ...conversation, session_api_key: "synthetic-key", tags: {} }}
++        active={active}
++      />,
++    );
++    expect(screen.queryByTitle("Live workspace preview")).toBeNull();
++    expect(await screen.findByTitle("Live workspace preview")).toHaveAttribute("src", fixture.url);
++    expect(grant).toHaveBeenCalledExactlyOnceWith(
++      new URL("/.well-known/openhands-preview-session", fixture.url),
++      expect.objectContaining({
++        method: "POST",
++        credentials: "include",
++        redirect: "error",
++        headers: { "X-Session-API-Key": "synthetic-key" },
++      }),
++    );
++  });
++
++  it("keeps the preview hidden when authorization is refused", async () => {
++    fixture.url = "https://sandboxabc.preview.app.example.test/";
++    const grant = vi.fn().mockResolvedValue(new Response(null, { status: 401 }));
++    vi.stubGlobal("fetch", grant);
++
++    render(
++      <PilotRecoveredPreview
++        conversation={{ ...conversation, session_api_key: "synthetic-key", tags: {} }}
++        active={active}
++      />,
++    );
++    await waitFor(() => expect(grant).toHaveBeenCalled());
++    expect(screen.queryByTitle("Live workspace preview")).toBeNull();
++  });
++});

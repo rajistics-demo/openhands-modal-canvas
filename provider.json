@@ -5,8 +5,8 @@
   "native_enterprise": "implemented",
   "resume_semantics": "replacement",
   "evidence": {
-    "api": "The Enterprise adapter ran on an earlier isolated Compose fixture. The packaged private gateway route still needs a live clean-install replay.",
-    "canvas": "Two earlier Enterprise Canvas trials restored the original conversation and live preview with its process memory intact on a replacement Modal VM.",
+    "api": "The packaged Enterprise image and Compose overlays deployed on isolated AWS. The app reached the private gateway, the public runtime edge denied the app container, and a native Modal conversation delivered an event to Enterprise history.",
+    "canvas": "One replay from the packaged Modal overlay and pinned Canvas source verified Pause, the original conversation, persisted history, and interactive preview state on a replacement Modal VM. The README lists this replay separately from the two earlier trials.",
     "expiry": "Recovery after Modal memory snapshot expiry is untested. The historical standalone controller verified filesystem restore separately."
   }
 }
