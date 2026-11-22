@@ -17,6 +17,20 @@ APIs as the E2B and DigitalOcean pilots. The Enterprise sandbox and conversation
 IDs stay stable. The adapter stores the Modal snapshot and rebinds the original
 authenticated Agent Server and preview routes to the replacement VM on resume.
 
+## Sandbox Spec compatibility
+
+The Modal Enterprise adapter uses the Enterprise Sandbox Spec catalog. Its
+`modal-agent-server` spec selects the VM configuration provided by the
+Modal adapter.
+
+Enterprise’s Sandbox Spec selector and Agent Profile references use the
+same ID contract when those features are available in the Enterprise
+release. Kubernetes uses that contract to refer to a named runtime
+configuration. This Compose package activates a single sandbox backend.
+Offering Kubernetes and microVMs in one installation still requires
+routing new launches to the selected provider and routing existing
+conversations through their saved sandbox binding.
+
 ## Packaged Compose replay
 
 The packaged Modal Enterprise overlay and pinned Canvas build ran on an

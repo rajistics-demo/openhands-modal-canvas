@@ -61,8 +61,11 @@ Build and mount the [pinned Canvas pilot](../canvas/README.md) before the
 browser test. This adapter advertises runtime Pause and the pilot accepts
 the authenticated preview origin without a conversation tag.
 
-The catalog lists `modal-agent-server`. The fixture reserves a single
-sandbox so the browser always accesses the correct HTTPS origin. Start a
+Confirm that the Sandbox V1 spec catalog lists `modal-agent-server`.
+Pass that ID as the `sandbox_spec_id` query parameter on
+`POST /api/v1/sandboxes` to select the environment explicitly.
+
+The fixture reserves a single sandbox so the browser always accesses the correct HTTPS origin. Start a
 synthetic conversation and verify an event in Enterprise. Run the
 [preview fixture](../validation/preview_probe.py) on loopback port **8012**.
 The guest's authenticated port 8011 wrapper serves its three routes.
